@@ -16,12 +16,14 @@
 # Also add information on how to contact you by electronic and paper mail.
 #
 # Copyright (C) 2013 Alessandro Andrioni
+# Copyright (C) 2013 Jordi Saludes
 
 
 module Intervals
 
 export
     Interval,
+    QQ,
     # bisect,
     # blow,
     # diam,
@@ -40,130 +42,94 @@ import
         csc, acos, asin, atan, acosh, asinh, atanh, isempty, union,
         intersect, in, cmp, inv
 
-typealias IntervalTypes Union(Float32, Float64, BigFloat)
+typealias QQ Rational{BigInt}
+typealias IntervalTypes Union(QQ)
 typealias SmallFloat Union(Float32, Float64)
 
-immutable Interval{T<:IntervalTypes} <: Number
+immutable Interval{T<:IntervalTypes}
     left::T
     right::T
 
-    function Interval(left::String, right::String)
-        left = parsedown(T, left)
-        right = parseup(T, right)
-        if left > right
-            left, right = right, left
-        end
-        new(left, right)
-    end
     function Interval(left::T, right::T)
         if left > right
-            left, right = right, left
+            error("Invalid: $left > $right")
         end
         new(left, right)
     end
 end
 
-# Monadic constructors
-Interval(x::Interval) = x
 Interval{T<:IntervalTypes}(x::T) = Interval{T}(x, x)
-Interval(x::Real) = Interval(convert(FloatingPoint, x))
-Interval(x::String) = Interval{BigFloat}(x, x)
-function Interval(x::Rational)
-    left = with_rounding(RoundDown) do
-        with_bigfloat_rounding(RoundDown) do
-            num(x) / den(x)
-        end
-    end
-    right = with_rounding(RoundUp) do
-        with_bigfloat_rounding(RoundUp) do
-            num(x) / den(x)
-        end
-    end
-    Interval(left, right)
-end
-
-# Dyadic constructors
 Interval{T<:IntervalTypes}(left::T, right::T) = Interval{T}(left, right)
-function Interval{T<:Real}(left::T, right::T)
-    Interval(convert(FloatingPoint, left), convert(FloatingPoint, right))
-end
-function Interval(left::Real, right::Real)
-    Interval(promote(left, right)...)
-end
-function Interval(left::String, right::String)
-    Interval{BigFloat}(left, right)
-end
+Interval(l::Rational, r::Rational) = Interval(big(l), big(r))
 
-# Converstion and promotion related functions
+# Conversion and promotion related functions
 # Conversions to Interval
-convert(::Type{Interval}, x::Rational) = Interval(x)
-convert(::Type{Interval}, x::Real) = Interval(x)
+convert(::Type{Interval{QQ}}, x::Number) = Interval(convert(QQ, x))
 
 # Conversions from Interval
-convert(::Type{BigFloat}, x::Interval) = convert(BigFloat, mid(x))
-convert(::Type{Float64}, x::Interval) = convert(Float64, mid(x))
-convert(::Type{Float32}, x::Interval) = convert(Float32, mid(x))
 
-for to in (Int8, Int16, Int32, Int64, Uint8, Uint16, Uint32, Uint64, BigInt, Float32)
-    @eval begin
-        function convert(::Type{$to}, x::Interval)
-            convert($to, convert(BigFloat, x))
-        end
-    end
-end
-convert(::Type{Integer}, x::Interval) = convert(BigInt, x)
-convert(::Type{FloatingPoint}, x::Interval) = convert(BigFloat, x)
+#convert(::Type{QQ}, i::Interval) = convert(QQ, mid(i))
+#for to in (Int8, Int16, Int32, Int64, Uint8, Uint16, Uint32, Uint64, BigInt, Float32)
+#    @eval begin
+#        function convert(::Type{$to}, x::Interval)
+#            convert($to, convert(QQ, x))
+#        end
+#    end
+#end
+
+promote_rule{T<:Number,S<:Number}(::Type{T}, ::Type{Interval{S}}) = Interval{promote_type(T,S)}
+
 
 # Basic operations
 function +(x::Interval, y::Interval)
-    l = roundop(+, RoundDown, x.left, y.left)
-    r = roundop(+, RoundUp, x.right, y.right)
+    l = x.left + y.left
+    r = x.right + y.right
     Interval(l, r)
 end
 function -(x::Interval, y::Interval)
-    l = roundop(-, RoundDown, x.left, y.right)
-    r = roundop(-, RoundUp, x.right, y.left)
+    l = x.left - y.right
+    r = x.right - y.left
     Interval(l, r)
 end
 function *(x::Interval, y::Interval)
     if x.left >= 0
         if y.left >= 0
-            l = roundop(*, RoundDown, x.left, y.left)
-            r = roundop(*, RoundUp, x.right, y.right)
+            l = *(x.left, y.left)
+            r = *(x.right, y.right)
         elseif y.right <= 0
-            l = roundop(*, RoundDown, x.right, y.left)
-            r = roundop(*, RoundUp, x.left, y.right)
+            l = *(x.right, y.left)
+            r = *(x.left, y.right)
         else
-            l = roundop(*, RoundDown, x.right, y.left)
-            r = roundop(*, RoundUp, x.right, y.right)
+            l = *(x.right, y.left)
+            r = *(x.right, y.right)
         end
     elseif x.right <= 0
         if y.left >= 0
-            l = roundop(*, RoundDown, x.left, y.right)
-            r = roundop(*, RoundUp, x.right, y.left)
+            l = *(x.left, y.right)
+            r = *(x.right, y.left)
         elseif y.right <= 0
-            l = roundop(*, RoundDown, x.right, y.right)
-            r = roundop(*, RoundUp, x.left, y.left)
+            l = *(x.right, y.right)
+            r = *(x.left, y.left)
         else
-            l = roundop(*, RoundDown, x.left, y.right)
-            r = roundop(*, RoundUp, x.left, y.left)
+            l = *(x.left, y.right)
+            r = *(x.left, y.left)
         end
     else
         if y.left >= 0
-            l = roundop(*, RoundDown, x.left, y.right)
-            r = roundop(*, RoundUp, x.right, y.right)
+            l = *(x.left, y.right)
+            r = *(x.right, y.right)
         elseif y.right <= 0
-            l = roundop(*, RoundDown, x.right, y.left)
-            r = roundop(*, RoundUp, x.left, y.left)
+            l = *(x.right, y.left)
+            r = *(x.left, y.left)
         else
-            l = min(roundop(*, RoundDown, x.left, y.right),
-                    roundop(*, RoundDown, x.right, y.left))
-            r = max(roundop(*, RoundUp, x.left, y.left),
-                    roundop(*, RoundUp, x.right, y.right))
+            l = min(*(x.left, y.right), *(x.right, y.left))
+            r = max(*(x.left, y.left), *(x.right, y.right))
         end
     end
     Interval(l, r)
 end
+
+*(x::Number, i::Interval) = (@show promote_type(typeof(x),typeof(i)); *(promote(x,i)...))
 # TODO: Reimplement directly without using inv
 function /(x::Interval, y::Interval)
     i = inv(y)
@@ -174,22 +140,15 @@ end
 function mid(x::Interval)
     m = x.left + x.right
     if isinf(m)
-        return (x.left / 2) + (x.right / 2)
+        return (x.left / 2) + (x.right / 2) # ??
     else
         return m / 2
     end
 end
 
-function inv{T<:SmallFloat}(x::Interval{T})
-    l = roundop(/, RoundDown, 1., x.right)
-    r = roundop(/, RoundUp, 1., x.left)
-    Interval(l, r)
-end
-# TODO: Call MPFR inv directly/write without roundop
-function inv(x::Interval{BigFloat})
-    i = BigFloat(1)
-    l = roundop(/, RoundDown, i, x.right)
-    r = roundop(/, RoundUp, i, x.left)
+function inv{T<:IntervalTypes}(x::Interval{T})
+    l = one(T)/x.right
+    r = one(T)/x.left
     Interval(l, r)
 end
 
@@ -197,50 +156,7 @@ end
 string(x::Interval) = "[$(string(x.left)), $(string(x.right))]"
 print(io::IO, x::Interval) = print(io, string(x))
 show(io::IO, x::Interval) = print(io, string(x))
-show(io::IO, x::Interval{BigFloat}) = print(io, string(x), " with $(precision(x.left)) bits of precision")
 showcompact(io::IO, x::Interval) = print(io, string(x))
 
-# Internal utility functions and macros
-function parseup(::Type{Float32}, x::String)
-    with_rounding(RoundUp) do
-        float32(x)
-    end
-end
-function parseup(::Type{Float64}, x::String)
-    with_rounding(RoundUp) do
-        float64(x)
-    end
-end
-function parseup(::Type{BigFloat}, x::String)
-    with_bigfloat_rounding(RoundUp) do
-        BigFloat(x)
-    end
-end
-function parsedown(::Type{Float32}, x::String)
-    with_rounding(RoundDown) do
-        float32(x)
-    end
-end
-function parsedown(::Type{Float64}, x::String)
-    with_rounding(RoundDown) do
-        float64(x)
-    end
-end
-function parsedown(::Type{BigFloat}, x::String)
-    with_bigfloat_rounding(RoundDown) do
-        BigFloat(x)
-    end
-end
-# TODO: Use macros instead?
-function roundop(f, r, x::SmallFloat, y::SmallFloat)
-    with_rounding(r) do
-        f(x, y)
-    end
-end
-function roundop(f, r, x::BigFloat, y::BigFloat)
-    with_bigfloat_rounding(r) do
-        f(x, y)
-    end
-end
 
 end # module
