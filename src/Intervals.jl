@@ -24,15 +24,16 @@ module Intervals
 export
     Interval,
     QQ,
-    # bisect,
+    bisect,
     # blow,
-    # diam,
+    diam,
     # diam_abs,
     # diam_rel,
     # mag,
-    mid
+    mid,
     # mig,
     # isbounded
+    bolzano
 
 import
     Base: precision, string, print, show, showcompact, promote_rule,
@@ -60,7 +61,7 @@ end
 
 Interval{T<:IntervalTypes}(x::T) = Interval{T}(x, x)
 Interval{T<:IntervalTypes}(left::T, right::T) = Interval{T}(left, right)
-Interval(l::Rational, r::Rational) = Interval(big(l), big(r))
+Interval{T<:Number}(l::T, r::T) = Interval(convert(QQ,l), convert(QQ,r))
 
 # Conversion and promotion related functions
 # Conversions to Interval
@@ -129,7 +130,7 @@ function *(x::Interval, y::Interval)
     Interval(l, r)
 end
 
-*(x::Number, i::Interval) = (@show promote_type(typeof(x),typeof(i)); *(promote(x,i)...))
+*(x::Number, i::Interval) = *(promote(x,i)...)
 # TODO: Reimplement directly without using inv
 function /(x::Interval, y::Interval)
     i = inv(y)
@@ -146,14 +147,40 @@ function mid(x::Interval)
     end
 end
 
+diam(i::Interval) = i.right - i.left
+
+function bisect(i::Interval)
+    c = mid(i)
+    Interval(i.left,c ), Interval(c,i.right)
+end
+    
 function inv{T<:IntervalTypes}(x::Interval{T})
     l = one(T)/x.right
     r = one(T)/x.left
     Interval(l, r)
 end
 
+
+# Bisection by a function
+
+    
+
+crossing(f::Function, i::Interval) = sign(f(i.right)) != sign(f(i.left))
+
+
+function bolzano(f::Function, i::Interval)
+    if crossing(f, i)
+        l,r = bisect(i)
+        crossing(f, l) ? l : r
+    else
+        error("No root inside $i.")
+    end
+end
+
+
+
 # Printing-related functions
-string(x::Interval) = "[$(string(x.left)), $(string(x.right))]"
+string(x::Interval) = "$(string(x.left))..$(string(x.right))"
 print(io::IO, x::Interval) = print(io, string(x))
 show(io::IO, x::Interval) = print(io, string(x))
 showcompact(io::IO, x::Interval) = print(io, string(x))
