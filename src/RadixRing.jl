@@ -5,6 +5,7 @@
 #	BIN, DEC, OCT, HEX
 
 typealias Radix Uint8
+typealias Exponent Int32
 
 for (i,n) in [(:BIN,2), (:DEC, 10), (:HEX, 16), (:OCT, 8)]
 	@eval ($i = uint8($n))
@@ -21,19 +22,19 @@ end
 
 function RadixStream(x::Integer, r::Integer)
 	b = @ckradix r
-	function f()
+	function intdigits()
 		produce(x)
 		return
 	end
-	RadixStream(b, f)
+	RadixStream(b, intdigits)
 end
 
 function RadixStream(x::Rational, r::Integer)
 	b = @ckradix r
-	function f()
+	function ratdigits()
 		divide(num(x), den(x), b)
 	end
-	RadixStream(b, f)
+	RadixStream(b, ratdigits)
 end
 
 
@@ -50,6 +51,19 @@ function divide(n::Integer, m::Integer, b::Radix)
 		divi(b*r)
 	end
 	divi(n)
+end
+
+
+function trunc(x::RadixStream, e::Exponent)
+	function truncated()
+ 		ds = Task(x.digits)
+ 	 	produce(consume(ds))
+ 	 	ea = 0
+ 	 	for (_,d)=zip([1:-e],ds)
+ 	 		produce(d)
+ 	 	end
+ 	end
+ 	RadixStream(x.radix, truncated)
 end
 
 
