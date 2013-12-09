@@ -2,15 +2,20 @@ module RadixStreams
 
 
 export
-	RadixNumber,
-	Approx, upto, exponent, 
+	RadixNumber
+
+export
+	Approx, upto!, exponent,
+	explode, implode, split, pop!
+
+export
 	BIN, DEC, OCT, HEX
 
 typealias Radix Uint8
 typealias Exponent Int32
 typealias Packet (Exponent, BigInt)
 
-maxexp= typemax(Exponent)
+maxexp = typemax(Exponent)
 
 # Usual radices
 for (i,n) in [(:BIN,2), (:DEC, 10), (:HEX, 16), (:OCT, 8)]
@@ -43,14 +48,6 @@ macro pkt(e,n)
 	:( (int32($e), big($n)) )
 end
 
-
-
-getpkt(a::Approx) = begin
-	(e,n) = consume(a.stream)
-	p = @pkt e n
-	append!(a.packets, p)
-	return p
-end
 
 
 macro ckradix(r)
@@ -93,30 +90,50 @@ function RadixNumber(x::Rational, r::Integer)
 end
 
 
-# Extract digits upto an exponent
-function upto(a::Approx, n::Integer)
-	if n < exponent(a)
-		for (e,m) = a.stream
-			append!(a.packets, [@pkt e m])
+# Extract digits upto! an exponent
+
+function pop!(a::Approx)
+	p = consume(a.stream)
+	push!(a.packets, p)
+	return p
+end
+
+function upto!(a::Approx, n::Integer)
+	if n >= exponent(a)
+		return # Do nothing
+	end
+	for (e,m) = a.stream
+		push!(a.packets, @pkt e m)
 			if e <= n
 				break
 			end
-		end
+	end
+	if istaskdone(a.stream) && n < exponent(a) # exact: add zeros
+		push!(a.packets, @pkt n 0)
 	end
 end
+
+
 
 
 # Truncation
 
 function trunc(n::RadixNumber, e::Exponent)
- 	a= Approx(n)
- 	upto(a, n)
+ 	a = Approx(n)
+ 	upto!(a, n)
+	convert(RadixNumber, a)
+end
+
+import Base.convert
+
+
+function convert(::Type{RadixNumber}, a::Approx)
 	function truncated()
 		for p=a.packets
 			produce(p)
 		end
- 	end
- 	RadixNumber(n.radix, truncated)
+	end
+	RadixNumber(a.radix, truncated)
 end
 
 
@@ -125,25 +142,73 @@ end
 int2char(r::Uint8) = char(r > 9 ? int('a') + r -10 : int('0') + r)
 char2int(c::Char) = c >= 'a' ? int(c) - int('a') + 10 : int(c) - int('0') 
 
-function fromInt(n::Integer,b::Uint8)
-	if n==0
-		return "0"
+function fromInt(n::Integer,b::Radix)
+	digs = Radix[]
+	while n > 0
+		n,r = divmod(n, b)
+		#s = "$(int2char(r))$s"
+		push!(digs, r)
 	end
-	s = ""
-	while n>0
-		n,r = div(n,b), uint8(rem(n,b))
-		s = "$(int2char(r))$s"
-	end
-	return s
+	return digs
 end
 
-function toInt(s::String,b::Uint8)
+
+
+function toInt(s::Array{Integer,1},b::Radix)
 	v = 0
-	for d=s
-		v = v*b + char2int(d)
+	for d = s
+		v = v*b + d # char2int(d)
 	end
 	return v
 end
+
+toInt(s::String, b::Radix) = toInt(map(char2int, convert(Array{Char,1},s)))
+
+
+function explode(a::Approx)
+	function exploded()
+		exp = maxexp
+		for (e,m) = a.stream
+			digs = Packet[]
+			for p = zip(e+[0:1000], fromInt(m ,a.radix))
+				push!(digs, p)
+			end
+			while maxexp > exp > length(digs) + e
+				produce((exp, 0))
+				exp -= 1
+			end
+			for p = reverse(digs)
+				produce(p)
+			end
+		end
+	end
+	Approx(a.radix, Task(exploded), Packet[])
+end
+
+function implode(l::Array{Packet,1}, b::Radix)
+	value = big(0)
+	e1 = minimum(map(p -> p[1], l))
+	for (e,d) = l
+		value += d * b^(e - e1)
+	end
+	return (e1,value)
+end
+
+function split(a::Approx, n::Integer)
+	function splat()
+		fp = Packet[]
+		for p = explode(a).stream
+			push!(fp, p)
+			if p[1] % n == 0
+				produce(implode(fp, a.radix))
+				empty!(fp)
+			end
+		end
+	end
+	Approx(a.radix, Task(splat), Packet[])
+end
+
+
 
 import Base.print
 
@@ -151,43 +216,67 @@ function print(io::IO, x::RadixNumber)
 	a = Approx(x)
 	b = a.radix
 	exponent = maxexp
-	print(io, "$b) ")
-	for (e1,n) in a.stream
-		dgs = fromInt(n, b)
-		e2 = e1 + length(dgs)
-		if exponent < maxexp
-			print(io, convert(String, repeat(['0'], inner=[exponent-e2])))
-		end
+	
+	function format(digs,e1)
+		e2 = e1 + length(digs)
 		if e1 < 0 <= e2
-			print(io, "$(dgs[1:e2]).$(dgs[e2+1:end])")
+			"$(digs[1:e2]).$(digs[e2+1:end])"
 		else
-			print(io, dgs)
+			digs
 		end
+	end
+
+	pr(s) = print(io, s)
+	function lpadto(s, n)
+		if n <= length(s)
+			return s
+		end
+		zeros = convert(String, repeat(['0'], inner=[n-length(s)]))
+		return "$zeros$s"
+	end
+
+	pr("$b) ")
+	for (e1,n) = a.stream
+		ds = fromInt(n, b)
+		dgs = isempty(ds) ? "0" : convert(String, map(int2char, ds))
+		if exponent < maxexp
+			dgs = lpadto(dgs, exponent - e1) # add significant zeros
+		end
+		pr(format(dgs, e1))
 		exponent = e1
 	end
 end
 
 function print(io::IO, a::Approx)
+	function pr(s)
+			prev ? print(io, " + ") : nothing
+			prev = true
+			print(io, s)
+	end
+	prev = false
 	for (e,m) = a.packets
 		if e == 0
-			print(io, m == 0 ? "" : "$m + ")
+			pr(m == 0 ? "" : "$m")
 		else
-			print(io, "$m*$(a.radix)^$e  + ")
+			pr("$m*$(a.radix)^$e")
 		end
 	end
-	println("...")
+	istaskdone(a.stream) ? println(io, "") : pr("...\n")
 end
 
-import Base.convert
 
-function convert(Rational, a::Approx)
-	num = zero(BigInt)
-	b = big(a.radix)
+function convert{T<:Number}(::Type{Rational{T}}, a::Approx)
+	num = zero(T)
+	b = convert(T, a.radix)
 	e0 = exponent(a)
+	if e0 == maxexp # Not started
+		return nothing
+	end
 	for (e,m) = a.packets
 		num += m * b^(e-e0)
 	end
 	e0 >=0 ? Rational(num * b^e0) : Rational(num, b^(-e0))
 end
+
 
 end # module
