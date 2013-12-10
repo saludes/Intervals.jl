@@ -23,17 +23,17 @@ module Intervals
 
 export
     Interval,
-    QQ,
-    bisect,
+    bisect, 
     # blow,
-    diam,
+    diam, ispoint,
     # diam_abs,
     # diam_rel,
     # mag,
     mid,
     # mig,
     # isbounded
-    bolzano
+    crossing, bolzano,
+    inner, outer
 
 import
     Base: precision, string, print, show, showcompact, promote_rule,
@@ -66,17 +66,6 @@ Interval{T<:Number}(l::T, r::T) = Interval(convert(QQ,l), convert(QQ,r))
 # Conversion and promotion related functions
 # Conversions to Interval
 convert(::Type{Interval{QQ}}, x::Number) = Interval(convert(QQ, x))
-
-# Conversions from Interval
-
-#convert(::Type{QQ}, i::Interval) = convert(QQ, mid(i))
-#for to in (Int8, Int16, Int32, Int64, Uint8, Uint16, Uint32, Uint64, BigInt, Float32)
-#    @eval begin
-#        function convert(::Type{$to}, x::Interval)
-#            convert($to, convert(QQ, x))
-#        end
-#    end
-#end
 
 promote_rule{T<:Number,S<:Number}(::Type{T}, ::Type{Interval{S}}) = Interval{promote_type(T,S)}
 
@@ -149,6 +138,8 @@ end
 
 diam(i::Interval) = i.right - i.left
 
+ispoint(i::Interval) = (diam(i) == 0)
+
 function bisect(i::Interval)
     c = mid(i)
     Interval(i.left,c ), Interval(c,i.right)
@@ -177,6 +168,16 @@ function bolzano(f::Function, i::Interval)
     end
 end
 
+# Inner and outer maps
+
+function inner(f::Function, i::Interval)
+    l, r = f(i.left), f(i.right)
+    Interval((l <= r ? (l,r) : (r,l))...)
+end
+
+function outer(f::Function, i::Interval)
+    apply(f,i)
+end
 
 
 # Printing-related functions
