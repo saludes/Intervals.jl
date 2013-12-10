@@ -1,4 +1,6 @@
-using RadixStreams
+module Sqrt
+
+	using RadixStreams, Intervals, RadixIntervals
 
 import Base.sqrt
 
@@ -31,5 +33,8 @@ exp = 50
 n2 = RadixNumber(2, HEX)
 b = sqrt(Approx(n2))
 upto!(b, -exp)
-s = convert(Q, b)
-@assert s^2 < 2 && (s + 1//big(b.radix)^exp)^2 > 2
+i = convert(Interval{Q}, b)
+@assert crossing(x -> x^2 - 2, i)
+@assert diam(i) < 2epsilon(b)
+
+end # module

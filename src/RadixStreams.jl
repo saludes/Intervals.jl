@@ -6,7 +6,7 @@ export
 
 export
 	Packet,
-	Approx, upto!, exponent, toInt,
+	Approx, upto!, exponent, epsilon, toInt,
 	explode, implode, split, pop!, hmerge
 
 export
@@ -43,7 +43,12 @@ end
 
 Approx(n::RadixNumber) = Approx(n.radix, Task(n.digits), Packet[])
 
+import Base.log
+
 exponent(a::Approx) = isempty(a.packets) ? maxexp : a.packets[end][1]
+epsilon(a::Approx) = float64(a.radix)^exponent(a)
+log(a::Approx, e) = log(e)/log(float64(a.radix))
+
 
 macro pkt(e,n)
 	:( (int32($e), big($n)) )
