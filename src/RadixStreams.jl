@@ -5,8 +5,9 @@ export
 	RadixNumber
 
 export
-	Approx, upto!, exponent,
-	explode, implode, split, pop!
+	Packet,
+	Approx, upto!, exponent, toInt,
+	explode, implode, split, pop!, hmerge
 
 export
 	BIN, DEC, OCT, HEX
@@ -132,7 +133,7 @@ function convert(::Type{RadixNumber}, a::Approx)
 		for p=a.packets
 			produce(p)
 		end
-	end
+	end # truncated
 	RadixNumber(a.radix, truncated)
 end
 
@@ -165,7 +166,7 @@ end
 toInt(s::String, b::Radix) = toInt(map(char2int, convert(Array{Char,1},s)))
 
 
-function explode(a::Approx)
+function explode(a::Approx; forever=false)
 	function exploded()
 		exp = maxexp
 		for (e,m) = a.stream
@@ -179,13 +180,21 @@ function explode(a::Approx)
 			end
 			for p = reverse(digs)
 				produce(p)
+				exp = p[1]
 			end
 		end
-	end
+		while forever # Continue giving 0's
+			exp -= 1
+			produce(@pkt exp 0)
+		end
+	end # exploded
 	Approx(a.radix, Task(exploded), Packet[])
 end
 
 function implode(l::Array{Packet,1}, b::Radix)
+	if isempty(l)
+		return (maxexp,0)
+	end
 	value = big(0)
 	e1 = minimum(map(p -> p[1], l))
 	for (e,d) = l
@@ -194,10 +203,16 @@ function implode(l::Array{Packet,1}, b::Radix)
 	return (e1,value)
 end
 
+function hmerge(a::Approx, n)
+	pks = splice!(a.packets, 1:n)
+	unshift!(a.packets, implode(pks, a.radix))
+	return a.packets[1]
+end
+
 function split(a::Approx, n::Integer)
 	function splat()
 		fp = Packet[]
-		for p = explode(a).stream
+		for p = explode(a, forever=true).stream
 			push!(fp, p)
 			if p[1] % n == 0
 				produce(implode(fp, a.radix))
@@ -231,7 +246,7 @@ function print(io::IO, x::RadixNumber)
 		if n <= length(s)
 			return s
 		end
-		zeros = convert(String, repeat(['0'], inner=[n-length(s)]))
+		zeros = "0"^(n-length(s))
 		return "$zeros$s"
 	end
 
